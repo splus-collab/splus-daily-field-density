@@ -16,9 +16,10 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_sun
 import datetime
+from datetime import timedelta
 import os
 import argparse
-import concurrent.futures
+import multiprocessing as mp
 
 
 # create a parser function to get user args for init and end dates
@@ -34,12 +35,14 @@ def parser():
                         type=str, required=True)
     parser.add_argument('-w', '--workdir', help='Working directory',
                         type=str, required=False, default=os.getcwd())
+    parser.add_argument('-n', '--ncores', help='Number of cores',
+                        type=int, required=False, default=1)
     args = parser.parse_args()
     return args
 
 
 # Calculate the if a field is observable for a given night
-def calc_field_track(workdir, f, night_starts, night_ends):
+def calc_field_track(workdir, f, night_starts):
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 *
                            u.deg, height=2200*u.m)  # pyright: ignore
     utcoffset = 0 * u.hour  # pyright: ignore
@@ -70,9 +73,9 @@ def calc_field_track(workdir, f, night_starts, night_ends):
     moon_brightness = (1. + np.cos(moon_phase))/2.0
 
     inivalue = delta_midnight[sunaltazs_time_overnight.alt < -
-                              18*u.deg].min().value  # pyright: ignore
+                              18*u.deg].min().value
     endvalue = delta_midnight[sunaltazs_time_overnight.alt < -
-                              18*u.deg].max().value  # pyright: ignore
+                              18*u.deg].max().value
     is_observable = np.zeros(f['NAME'].size)
 
     for i in range(f['RA'].size):
@@ -84,14 +87,14 @@ def calc_field_track(workdir, f, night_starts, night_ends):
                   moon_brightness, 'sep:', moon_pos.separation(mycoords).value)
         elif (moon_brightness >= .85):
             if (f['NAME'][i].split('-')[-1][0] not in ['b', 'd']):
-                myaltaz = mycoords.transform_to(
-                    AltAz(obstime=set_time, location=mysite))
+                # myaltaz = mycoords.transform_to(
+                #     AltAz(obstime=set_time, location=mysite))
 
                 # myaltazs_tonight = mycoords.transform_to(frame_tonight)
 
                 myaltazs_time_overnight = mycoords.transform_to(
                     frame_time_overnight)
-                mask = myaltazs_time_overnight.alt.value > 35.
+                mask = myaltazs_time_overnight.alt.value > 35.  # pyright: ignore
                 mask &= (delta_midnight.value > inivalue) & (
                     delta_midnight.value < endvalue)
 
@@ -149,6 +152,27 @@ def calc_field_track(workdir, f, night_starts, night_ends):
     ascii.write(t, tab_name, format='csv', overwrite=True)
 
 
+def generate_date_range(start_date, end_date):
+    date_range = []
+    current_date = start_date
+
+    while current_date <= end_date:
+        date_range.append(current_date.strftime('%Y-%m-%d'))
+        current_date += timedelta(days=1)
+
+    return date_range
+
+
+def run_calc_field_track(workdir, f, night_range):
+    """Run the calc_field_track function for a range of nights."""
+    # TODO: check if night already exists in outputs
+    for night in night_range:
+        if night == 'dummydate':
+            continue
+        else:
+            calc_field_track(workdir, f, night)
+
+
 def main():
     args = parser()
     workdir = args.workdir
@@ -156,8 +180,48 @@ def main():
     night_ends = args.night_ends
     field_file = args.fields
 
+    # TODO: check if final output already exists
+
     f = ascii.read(field_file)
-    calc_field_track(workdir, f, night_starts, night_ends)
+
+    # calculate a range of dates between night_starts and night_ends
+    start_date = Time(night_starts)
+    end_date = Time(night_ends)
+    date_range = generate_date_range(start_date, end_date)
+
+    if args.ncores is None:
+        num_procs = 4
+    else:
+        num_procs = args.ncores
+
+    if len(date_range) % num_procs > 0:
+        increase_to = len(date_range) / num_procs + 1
+        i = 0
+        while i < (increase_to * num_procs - len(date_range)):
+            date_range.append('dummydate')
+            i += 1
+        else:
+            print('the dates already meet the requirement of num_procs')
+    dates = np.array(date_range).reshape(
+        (num_procs, int(len(date_range) / num_procs)))
+    print('Calculating for a total of', len(date_range), 'days')
+    print('Using', num_procs, 'processes')
+
+    jobs = []
+    for date_list in dates:
+        process = mp.Process(target=run_calc_field_track,
+                             args=(workdir, f, date_list))
+        jobs.append(process)
+
+    # start the processes
+    for j in jobs:
+        j.start()
+
+    # ensure all processes have finished execution
+    for j in jobs:
+        j.join()
+
+    print('All done!')
 
 
 if __name__ == '__main__':
