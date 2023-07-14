@@ -18,6 +18,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_su
 import datetime
 from datetime import timedelta
 import os
+import sys
 import argparse
 import multiprocessing as mp
 
@@ -184,7 +185,14 @@ def main():
     night_ends = args.night_ends
     field_file = args.fields
 
-    # TODO: check if final output already exists
+    path_to_final_output = os.path.join(workdir,
+                                        'tiles_nc_%s-%s.csv' % (night_starts,
+                                                                night_ends))
+    if os.path.isfile(path_to_final_output):
+        print('final output already exists')
+        sys.exit()
+    else:
+        print('Running simulation for %s to %s' % (night_starts, night_ends))
 
     f = ascii.read(field_file)
 
