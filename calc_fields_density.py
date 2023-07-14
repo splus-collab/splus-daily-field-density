@@ -10,6 +10,7 @@ given night within a user-defined period of time.
 """
 
 import numpy as np
+import astropy
 import astropy.units as u
 from astropy.io import ascii
 from astropy.table import Table
@@ -21,6 +22,35 @@ import os
 import sys
 import argparse
 import multiprocessing as mp
+import logging
+import warnings
+import colorlog
+
+# reset logging config
+logging.shutdown()
+logging.root.handlers.clear()
+
+# configure the module with colorlog
+logger = colorlog.getLogger()
+logger.setLevel(logging.INFO)
+
+# create a formatter with green color for INFO level
+formatter = colorlog.ColoredFormatter(
+    '%(log_color)s%(levelname)s:%(name)s:%(message)s',
+    log_colors={
+        'DEBUG':    'cyan',
+        'INFO':     'blue',
+        'WARNING':  'yellow',
+        'ERROR':    'red',
+        'CRITICAL': 'red,bg_white',
+    })
+
+# create handler and set the formatter
+ch = logging.StreamHandler()
+ch.setFormatter(formatter)
+
+# add the handler to the logger
+logger.addHandler(ch)
 
 
 # create a parser function to get user args for init and end dates
@@ -44,9 +74,15 @@ def parser():
 
 # Calculate the if a field is observable for a given night
 def calc_field_track(f, night_starts, tab_name):
+    """
+    Calculate the if a field is observable for a given night.
+    """
+    # warn user that site is hardcoded to CTIO
+    warnings.warn(datetime.datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 *
-                           u.deg, height=2200*u.m)  # pyright: ignore
-    utcoffset = 0 * u.hour  # pyright: ignore
+                           u.deg, height=2200*u.m)
+    utcoffset = 0 * u.hour
 
     ns = Time('%s 00:00:00' % night_starts).datetime
     inithour = '23:59:00'
@@ -57,8 +93,6 @@ def calc_field_track(f, night_starts, tab_name):
     set_time = Time('%s %s' % (night_starts, inithour)) - utcoffset
     midnight = Time('%s 00:00:00' % night_ends) - utcoffset
     delta_midnight = np.linspace(-4, 10, 200)*u.hour
-    # frame_tonight = AltAz(obstime=midnight + delta_midnight,
-    #                       location=mysite)
 
     times_time_overnight = midnight + delta_midnight
     frame_time_overnight = AltAz(obstime=times_time_overnight, location=mysite)
@@ -178,6 +212,33 @@ def run_calc_field_track(workdir, f, night_range):
                 print('table', tab_name, 'already exists')
 
 
+def stack_tables(workdir, night_range, path_to_final_output):
+    """Stack the tables for the different nights."""
+
+    outdir = os.path.join(workdir, 'outputs')
+    if os.path.isdir(outdir) is False:
+        os.mkdir(outdir)
+
+    for night in night_range:
+        if night == 'dummydate':
+            continue
+        else:
+            tab_name = os.path.join(outdir, night + '.csv')
+            if os.path.isfile(tab_name) is False:
+                print('table', tab_name, 'does not exist')
+                sys.exit()
+            else:
+                t = ascii.read(tab_name)
+                if night == night_range[0]:
+                    t0 = t
+                else:
+                    t0 = astropy.table.join(t0, t, keys='NAME',
+                                            join_type='outer')
+
+    t0.write(os.path.join(workdir, path_to_final_output), format='csv',
+             overwrite=True)
+
+
 def main():
     args = parser()
     workdir = args.workdir
@@ -186,13 +247,20 @@ def main():
     field_file = args.fields
 
     path_to_final_output = os.path.join(workdir,
-                                        'tiles_nc_%s-%s.csv' % (night_starts,
-                                                                night_ends))
+                                        'tiles_nc_density_%s-%s.csv' %
+                                        (night_starts, night_ends))
     if os.path.isfile(path_to_final_output):
-        print('final output already exists')
+        logger.info(' ' +
+                    datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
+                    ' The output file %s already exists. Exiting.' %
+                    path_to_final_output)
         sys.exit()
     else:
-        print('Running simulation for %s to %s' % (night_starts, night_ends))
+        logger.info(' ' +
+                    datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
+                    ' The output file %s does not exist. Running silulation\
+                    for %s to %s' %
+                    (path_to_final_output, night_starts, night_ends))
 
     f = ascii.read(field_file)
 
@@ -213,7 +281,9 @@ def main():
             date_range.append('dummydate')
             i += 1
         else:
-            print('the dates already meet the requirement of num_procs')
+            logger.info(' ' + datetime.datetime.now().strftime(
+                '%Y-%m-%d %H:%M:%S') + ' Dates already meet the requirement\
+                of num_procs')
     dates = np.array(date_range).reshape(
         (num_procs, int(len(date_range) / num_procs)))
     print('Calculating for a total of', len(date_range), 'days')
@@ -226,6 +296,8 @@ def main():
         jobs.append(process)
 
     # start the processes
+    logger.info(' ' + datetime.datetime.now().strftime(
+        '%Y-%m-%d %H:%M:%S') + ' Starting the processes')
     for j in jobs:
         j.start()
 
@@ -234,6 +306,12 @@ def main():
         j.join()
 
     print('All done!')
+
+    # stack the tables
+    logger.info(' ' + datetime.datetime.now().strftime(
+        '%Y-%m-%d %H:%M:%S') + ' Stacking the tables into \
+        %s' % path_to_final_output)
+    stack_tables(workdir, date_range, path_to_final_output)
 
 
 if __name__ == '__main__':
