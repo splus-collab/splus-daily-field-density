@@ -23,34 +23,38 @@ import sys
 import argparse
 import multiprocessing as mp
 import logging
-import warnings
+# import warnings
 import colorlog
 
-# reset logging config
-logging.shutdown()
-logging.root.handlers.clear()
+# use a function to restart the logger before every run
 
-# configure the module with colorlog
-logger = colorlog.getLogger()
-logger.setLevel(logging.INFO)
 
-# create a formatter with green color for INFO level
-formatter = colorlog.ColoredFormatter(
-    '%(log_color)s%(levelname)s:%(name)s:%(message)s',
-    log_colors={
-        'DEBUG':    'cyan',
-        'INFO':     'blue',
-        'WARNING':  'yellow',
-        'ERROR':    'red',
-        'CRITICAL': 'red,bg_white',
-    })
+def call_logger():
+    # reset logging config
+    logging.shutdown()
+    logging.root.handlers.clear()
 
-# create handler and set the formatter
-ch = logging.StreamHandler()
-ch.setFormatter(formatter)
+    # configure the module with colorlog
+    logger = colorlog.getLogger()
+    logger.setLevel(logging.INFO)
 
-# add the handler to the logger
-logger.addHandler(ch)
+    # create a formatter with green color for INFO level
+    formatter = colorlog.ColoredFormatter(
+        '%(log_color)s%(levelname)s:%(name)s:%(message)s',
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'blue',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        })
+
+    # create handler and set the formatter
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+
+    # add the handler to the logger
+    logger.addHandler(ch)
 
 
 # create a parser function to get user args for init and end dates
@@ -77,9 +81,14 @@ def calc_field_track(f, night_starts, tab_name):
     """
     Calculate the if a field is observable for a given night.
     """
+    call_logger()
+    logger = logging.getLogger(__name__)
+
     # warn user that site is hardcoded to CTIO
-    warnings.warn(datetime.datetime.now().strftime(
+    logger.warning(datetime.datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
+    # warnings.warn(datetime.datetime.now().strftime(
+    #     "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 *
                            u.deg, height=2200*u.m)
     utcoffset = 0 * u.hour
@@ -117,9 +126,9 @@ def calc_field_track(f, night_starts, tab_name):
         mycoords = SkyCoord(ra=f['RA'][i], dec=f['DEC'][i],
                             unit=(u.hourangle, u.deg))
         if (moon_pos.separation(mycoords).value < 50):
-            # is_observable[i] = 0
-            print(f['NAME'][i], night_starts, 'state: moon or separation; moon',
-                  moon_brightness, 'sep:', moon_pos.separation(mycoords).value)
+            logger.info(' ' + datetime.datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S") + ' - ' + f['NAME'][i] + ' - moon \
+                separation: ' + str(moon_pos.separation(mycoords).value))
         elif (moon_brightness >= .85):
             if (f['NAME'][i].split('-')[-1][0] not in ['b', 'd']):
                 # myaltaz = mycoords.transform_to(
@@ -129,7 +138,7 @@ def calc_field_track(f, night_starts, tab_name):
 
                 myaltazs_time_overnight = mycoords.transform_to(
                     frame_time_overnight)
-                mask = myaltazs_time_overnight.alt.value > 35.  # pyright: ignore
+                mask = myaltazs_time_overnight.alt.value > 35.
                 mask &= (delta_midnight.value > inivalue) & (
                     delta_midnight.value < endvalue)
 
@@ -139,16 +148,25 @@ def calc_field_track(f, night_starts, tab_name):
                     time_on_the_sky = on_the_sky.max() - on_the_sky.min()
                     if time_on_the_sky > 2.:
                         is_observable[i] = 1
-                        print(f['NAME'][i], night_starts,
-                              'state: on the sky:', time_on_the_sky, 'h')
+                        print(datetime.datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"),
+                            f['NAME'][i], night_starts,
+                            'state: on the sky:', time_on_the_sky, 'h')
                     else:
-                        print(f['NAME'][i], night_starts,
-                              'state: too low:', time_on_the_sky, 'h')
+                        print(datetime.datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"),
+                            f['NAME'][i], night_starts, 'state: too \
+                            low:', time_on_the_sky, 'h')
                 else:
-                    print(f['NAME'][i], night_starts, 'state: not on the sky')
+                    print(datetime.datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"),
+                        f['NAME'][i], night_starts, 'state: not on the sky')
             else:
-                print(f['NAME'][i], night_starts, 'state: moon or separation; moon',
-                      moon_brightness, 'sep:', moon_pos.separation(mycoords).value)
+                print(datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"),
+                    f['NAME'][i], night_starts, 'state: moon or separation; \
+                    moon', moon_brightness, 'sep:\
+                    ', moon_pos.separation(mycoords).value)
         else:
             # myaltaz = mycoords.transform_to(
             #     AltAz(obstime=set_time, location=mysite))
@@ -157,7 +175,7 @@ def calc_field_track(f, night_starts, tab_name):
 
             myaltazs_time_overnight = mycoords.transform_to(
                 frame_time_overnight)
-            mask = myaltazs_time_overnight.alt.value > 35.  # pyright: ignore
+            mask = myaltazs_time_overnight.alt.value > 35.
             mask &= (delta_midnight.value > inivalue) & (
                 delta_midnight.value < endvalue)
 
@@ -167,18 +185,27 @@ def calc_field_track(f, night_starts, tab_name):
                 time_on_the_sky = on_the_sky.max() - on_the_sky.min()
                 if time_on_the_sky > 2.:
                     is_observable[i] = 1
-                    print(f['NAME'][i], night_starts,
-                          'state: on the sky:', time_on_the_sky, 'h')
+                    print(datetime.datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"),
+                        f['NAME'][i], night_starts,
+                        'state: on the sky:\
+                          ', time_on_the_sky, 'h')
                 else:
-                    print(f['NAME'][i], night_starts,
-                          'state: too low:', time_on_the_sky, 'h')
+                    print(datetime.datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"),
+                        f['NAME'][i], night_starts,
+                        'state: too low:\
+                          ', time_on_the_sky, 'h')
             else:
-                print(f['NAME'][i], night_starts, 'state: not on the sky')
+                print(datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"),
+                    f['NAME'][i], night_starts, 'state: not on the sky')
 
     t = Table([f['NAME'], is_observable], names=['NAME', night_starts],
               dtype=['S20', 'i1'])
 
-    print('saving table', tab_name)
+    print(datetime.datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"), 'Saving table', tab_name)
 
     ascii.write(t, tab_name, format='csv', overwrite=True)
 
@@ -197,6 +224,9 @@ def generate_date_range(start_date, end_date):
 def run_calc_field_track(workdir, f, night_range):
     """Run the calc_field_track function for a range of nights."""
 
+    call_logger()
+    logger = logging.getLogger(__name__)
+
     outdir = os.path.join(workdir, 'outputs')
     if os.path.isdir(outdir) is False:
         os.mkdir(outdir)
@@ -209,11 +239,16 @@ def run_calc_field_track(workdir, f, night_range):
             if os.path.isfile(tab_name) is False:
                 calc_field_track(f, night, tab_name)
             else:
-                print('table', tab_name, 'already exists')
+                logger.info(' ' + datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S") + ' - table', tab_name, 'already \
+                    exists')
 
 
 def stack_tables(workdir, night_range, path_to_final_output):
     """Stack the tables for the different nights."""
+
+    call_logger()
+    logger = logging.getLogger(__name__)
 
     outdir = os.path.join(workdir, 'outputs')
     if os.path.isdir(outdir) is False:
@@ -225,8 +260,10 @@ def stack_tables(workdir, night_range, path_to_final_output):
         else:
             tab_name = os.path.join(outdir, night + '.csv')
             if os.path.isfile(tab_name) is False:
-                print('table', tab_name, 'does not exist')
-                sys.exit()
+                logger.error(' ' + datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S") + ' - Table', tab_name, 'does \
+                    not exist')
+                sys.exit(1)
             else:
                 t = ascii.read(tab_name)
                 if night == night_range[0]:
@@ -240,6 +277,10 @@ def stack_tables(workdir, night_range, path_to_final_output):
 
 
 def main():
+    """Main function."""
+    call_logger()
+    logger = logging.getLogger(__name__)
+
     args = parser()
     workdir = args.workdir
     night_starts = args.night_starts
@@ -286,8 +327,12 @@ def main():
                 of num_procs')
     dates = np.array(date_range).reshape(
         (num_procs, int(len(date_range) / num_procs)))
-    print('Calculating for a total of', len(date_range), 'days')
-    print('Using', num_procs, 'processes')
+    print(datetime.datetime.now().strftime(
+        '%Y-%m-%d %H:%M:%S'),
+        'Calculating for a total of', len(date_range), 'days')
+    print(datetime.datetime.now().strftime(
+        '%Y-%m-%d %H:%M:%S'),
+        'Using', num_procs, 'processes')
 
     jobs = []
     for date_list in dates:
