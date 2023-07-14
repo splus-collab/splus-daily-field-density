@@ -11,6 +11,7 @@ import os
 import numpy as np
 from astropy.io import ascii
 from astropy.time import Time
+import datetime
 import argparse
 import matplotlib.pyplot as plt
 # import matplotlib.style
@@ -24,7 +25,9 @@ def parser():
     parser = argparse.ArgumentParser(
         description='Plot the tile density of the SPLUS Main Survey along the \
         period available in the database')
-    parser.add_argument('-f', '--file', help='Input file', required=True)
+    parser.add_argument('-f', '--file_input', help='Input file', required=True)
+    parser.add_argument('-fo', '--footprint', help='Footprint file',
+                        required=True)
     parser.add_argument('-ns', '--start_date',
                         help='Start date', required=True)
     parser.add_argument('-ne', '--end_date', help='End date', required=True)
@@ -38,56 +41,100 @@ def parser():
     args = parser.parse_args()
     return args
 
-# create function to check if start_date and end_date are within the input file
-
 
 def check_dates(fname, start_date, end_date):
+    # create function to check if start_date and end_date are within the input file
     """Check if start_date and end_date are within the input file"""
+    # check is start_date and end_date are valid dates
+    try:
+        start_date = Time(start_date)
+        end_date = Time(end_date)
+    except ValueError:
+        raise ValueError('Invalid date format for start_date or end_date \
+                         or date not in calendar')
+
     f = ascii.read(fname)
     dates = f.keys()
     if start_date not in dates:
-        print('Start date not in the input file')
-        return False
+        raise ValueError('Start date not in the input file')
     if end_date not in dates:
-        print('End date not in the input file')
-        return False
+        raise ValueError('End date not in the input file')
+
+# create function to plot the tile density using the input file
 
 
-f = ascii.read('tiles_new20190701_clean_2019B2020A.csv')
+def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, save):
+    """Plot the tile density using the input file"""
+    # read the input file and the footprint file
+    fi = ascii.read(os.path.join(workdir, finput))
+    foot = ascii.read(os.path.join(workdir, ffoot))
 
-nfields = []
-days = []
-myear = []
+    # get the list of dates
+    dates = [Time(key) for key in fi.keys() if '-' in key]
+    # make a list of days
+    days = [date.datetime.day for date in dates if start_date <= date <= end_date]
+    # make a list of year-month
+    myear = [date.datetime.strftime("%Y-%m")
+             for date in dates if start_date <= date <= end_date]
 
-mask = (f['STATUS'] != 1) & (f['STATUS'] != 2) & (f['STATUS'] != 4)
-for key in f.keys()[6:]:
-    ndate = Time(key)
-    days.append(ndate.datetime.day)
-    myear.append(ndate.datetime.strftime("%Y-%m"))
-    nfields.append(int(f[key][mask].sum()/100))
+    # make mask all non-observed tiles
+    mask = (foot['STATUS'] == 0) | (foot['STATUS'] == 3)
 
-plt.figure(figsize=(10, 5))
-# sc = plt.scatter(days[:-1], myear[:-1], c=np.log10(nfields[:-1]), cmap='hot_r',
-sc = plt.scatter(days[:-1], myear[:-1], c=nfields[:-1], cmap='hot_r',
-                 edgecolor='none', marker='s', s=200, vmin=0, vmax=24)
+    # make a list of number of fields
+    nfields = [int(fi[date.datetime.strftime("%Y-%m-%d")][mask].sum())
+               for date in dates if start_date <= date <= end_date]
+
+    # plot the tile density
+    plt.figure(figsize=(10, 5))
+    sc = plt.scatter(days[:-1], myear[:-1], c=nfields[:-1], cmap='hot_r',
+                     edgecolor='none', marker='s', s=200)  # , vmin=0, vmax=24)
+
+    cb = plt.colorbar(sc)
+    cb.set_label('$\mathrm{Ntiles / night}$', fontsize=18)
+
+    plt.xlabel('$\mathrm{Day}$', fontsize=18)
+    plt.ylabel('$\mathrm{Year-month}$', fontsize=18)
+    plt.xlim(0, 32)
+    plt.gca().invert_yaxis()
+    plt.grid()
+    plt.title('$\mathrm{Total\ of\ tiles\ remaining\ as\ of\ %s:\ %i}$' %
+              (datetime.datetime.now().strftime("%Y/%m/%d"),
+               foot['NAME'][~mask].size), fontsize=16)
+
+    plt.tight_layout()
+
+    if save:
+        outputname = output if output else 'tile_density_%s_%s.png' % (
+            start_date, end_date)
+        # make verbose
+        if verbose:
+            print('Saving figure output to %s' % outputname)
+        plt.savefig(os.path.join(workdir, outputname), format='png',
+                    bbox_inches='tight', dpi=150)
+
+    plt.show()
 
 
-# for i in range(len(nfields)):
-#    plt.add_patch(Rectangle((days[i] - .5,
-#                            myear[i] - .5), 1., 1.,
-#                           ec='k', fc=,
-#                           alpha=1, zorder=-1))
+def main():
+    """Main function"""
+    # get the arguments
+    args = parser()
+    finput = args.file_input
+    ffoot = args.footprint
+    start_date = args.start_date
+    end_date = args.end_date
+    output = args.output
+    verbose = args.verbose
+    save = args.save
+    workdir = args.workdir
 
-cb = plt.colorbar(sc, ticks=np.arange(0, 25, 2))
-cb.set_label('$\mathrm{Ntiles / night}$', fontsize=18)
+    # check if start_date and end_date are within the input file
+    check_dates(finput, start_date, end_date)
 
-plt.xlabel('$\mathrm{Day}$', fontsize=18)
-plt.ylabel('$\mathrm{Year-month}$', fontsize=18)
-plt.xlim(0, 32)
-plt.gca().invert_yaxis()
-plt.grid()
-plt.title('$\mathrm{Total\ of\ tiles\ remaining:\ %i}$' % f['PID'][mask].size)
+    # plot the tile density using the input file
+    plot_density(workdir, finput, ffoot, start_date,
+                 end_date, output, verbose, save)
 
-plt.tight_layout()
 
-plt.show(block=False)
+if __name__ == '__main__':
+    main()
