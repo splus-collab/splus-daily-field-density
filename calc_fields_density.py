@@ -291,6 +291,7 @@ def main():
     night_ends = args.night_ends
     field_file = args.fields
     output_file = args.output_file
+    num_procs = args.ncores
 
     if output_file is None:
         path_to_final_output = os.path.join(workdir,
@@ -319,21 +320,23 @@ def main():
     end_date = Time(night_ends)
     date_range = generate_date_range(start_date, end_date)
 
-    if args.ncores is None:
-        num_procs = 4
-    else:
-        num_procs = args.ncores
+    # find the for which len(date_range) % num_procs == 0
 
     if len(date_range) % num_procs > 0:
-        increase_to = len(date_range) / num_procs + 1
-        i = 0
-        while i < (increase_to * num_procs - len(date_range)):
+        increase_to = int(np.ceil(len(date_range) / num_procs)) * num_procs
+        print(datetime.datetime.now().strftime(
+            '%Y-%m-%d %H:%M:%S'),
+            'Increasing the number of days to', increase_to)
+        while len(date_range) < increase_to:
+            print(datetime.datetime.now().strftime(
+                '%Y-%m-%d %H:%M:%S'),
+                'Including a dummy date to make the number of days divisible\
+                by', num_procs)
             date_range.append('dummydate')
-            i += 1
         else:
             logger.info(' ' + datetime.datetime.now().strftime(
-                '%Y-%m-%d %H:%M:%S') + ' Dates already meet the requirement\
-                of num_procs')
+                '%Y-%m-%d %H:%M:%S') + ' Dates now meet the requirement\
+                of ncores')
     dates = np.array(date_range).reshape(
         (num_procs, int(len(date_range) / num_procs)))
     print(datetime.datetime.now().strftime(
