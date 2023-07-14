@@ -93,8 +93,7 @@ def calc_field_track(f, night_starts, tab_name):
         "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
     # warnings.warn(datetime.datetime.now().strftime(
     #     "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
-    mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 *
-                           u.deg, height=2200*u.m)
+    mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 * u.deg, height=2200*u.m)
     utcoffset = 0 * u.hour
 
     ns = Time('%s 00:00:00' % night_starts).datetime
