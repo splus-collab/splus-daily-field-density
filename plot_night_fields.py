@@ -8,13 +8,11 @@
 
 from __future__ import print_function
 import os
-import numpy as np
 from astropy.io import ascii
 from astropy.time import Time
 import datetime
 import argparse
 import matplotlib.pyplot as plt
-# import matplotlib.style
 import matplotlib as mpl
 mpl.style.use('classic')
 
@@ -68,21 +66,34 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, 
     # read the input file and the footprint file
     fi = ascii.read(os.path.join(workdir, finput))
     foot = ascii.read(os.path.join(workdir, ffoot))
+    if verbose:
+        print("Input file and footprint file read successfully.")
 
     # get the list of dates
     dates = [Time(key) for key in fi.keys() if '-' in key]
+    if verbose:
+        print("Dates extracted from the input file.")
     # make a list of days
     days = [date.datetime.day for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Days extracted within the specified range.")
     # make a list of year-month
     myear = [date.datetime.strftime("%Y-%m")
              for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Year-month extracted within the specified range.")
 
     # make mask all non-observed tiles
     mask = (foot['STATUS'] == 0) | (foot['STATUS'] == 3)
+    if verbose:
+        print("Mask created for non-observed tiles.")
 
     # make a list of number of fields
     nfields = [int(fi[date.datetime.strftime("%Y-%m-%d")][mask].sum())
                for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Number of fields calculated within the specified range.")
+        print("Plotting the tile density.")
 
     # plot the tile density
     plt.figure(figsize=(10, 5))
@@ -111,7 +122,14 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, 
             print('Saving figure output to %s' % outputname)
         plt.savefig(os.path.join(workdir, outputname), format='png',
                     bbox_inches='tight', dpi=150)
+        if verbose:
+            print('Figure saved successfully.')
+    else:
+        if verbose:
+            print('Plot was not saved. If you want to save it, use the -s option.')
 
+    if verbose:
+        print('Showing plot.')
     plt.show()
 
 
