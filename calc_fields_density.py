@@ -42,7 +42,7 @@ def parser():
 
 
 # Calculate the if a field is observable for a given night
-def calc_field_track(workdir, f, night_starts):
+def calc_field_track(f, night_starts, tab_name):
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 *
                            u.deg, height=2200*u.m)  # pyright: ignore
     utcoffset = 0 * u.hour  # pyright: ignore
@@ -140,10 +140,6 @@ def calc_field_track(workdir, f, night_starts):
             else:
                 print(f['NAME'][i], night_starts, 'state: not on the sky')
 
-    outdir = os.path.join(workdir, 'outputs')
-    if os.path.isdir(outdir) is False:
-        os.mkdir(outdir)
-    tab_name = os.path.join(outdir, night_starts + '.csv')
     t = Table([f['NAME'], is_observable], names=['NAME', night_starts],
               dtype=['S20', 'i1'])
 
@@ -165,12 +161,20 @@ def generate_date_range(start_date, end_date):
 
 def run_calc_field_track(workdir, f, night_range):
     """Run the calc_field_track function for a range of nights."""
-    # TODO: check if night already exists in outputs
+
+    outdir = os.path.join(workdir, 'outputs')
+    if os.path.isdir(outdir) is False:
+        os.mkdir(outdir)
+
     for night in night_range:
         if night == 'dummydate':
             continue
         else:
-            calc_field_track(workdir, f, night)
+            tab_name = os.path.join(outdir, night + '.csv')
+            if os.path.isfile(tab_name) is False:
+                calc_field_track(f, night, tab_name)
+            else:
+                print('table', tab_name, 'already exists')
 
 
 def main():
