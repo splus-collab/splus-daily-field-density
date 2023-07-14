@@ -26,8 +26,31 @@ import logging
 # import warnings
 import colorlog
 
-# use a function to restart the logger before every run
 
+# create a parser function to get user args for init and end dates
+def parser():
+    """Take care of all the argparse stuff."""
+    parser = argparse.ArgumentParser(
+        description='Calculate the density of fields for a given night within \
+        a user-defined period of time.')
+    parser.add_argument('-ns', '--night_starts',
+                        help='Night starts', type=str, required=True)
+    parser.add_argument('-ne', '--night_ends',
+                        help='Night ends', type=str, required=True)
+    parser.add_argument('-f', '--fields', help='S-PLUS fields file',
+                        type=str, required=True)
+    parser.add_argument('-o', '--output_file', help='Output file',
+                        type=str, required=False)
+    parser.add_argument('-w', '--workdir', help='Working directory',
+                        type=str, required=False, default=os.getcwd())
+    parser.add_argument('-n', '--ncores', help='Number of cores',
+                        type=int, required=False, default=1)
+    args = parser.parse_args()
+
+    return args
+
+
+# use a function to restart the logger before every run
 
 def call_logger():
     # reset logging config
@@ -55,25 +78,6 @@ def call_logger():
 
     # add the handler to the logger
     logger.addHandler(ch)
-
-
-# create a parser function to get user args for init and end dates
-def parser():
-    """Take care of all the argparse stuff."""
-    parser = argparse.ArgumentParser(
-        description='Calculate the density of fields for a given night within a user-defined period of time.')
-    parser.add_argument('-ns', '--night_starts',
-                        help='Night starts', type=str, required=True)
-    parser.add_argument('-ne', '--night_ends',
-                        help='Night ends', type=str, required=True)
-    parser.add_argument('-f', '--fields', help='S-PLUS fields file',
-                        type=str, required=True)
-    parser.add_argument('-w', '--workdir', help='Working directory',
-                        type=str, required=False, default=os.getcwd())
-    parser.add_argument('-n', '--ncores', help='Number of cores',
-                        type=int, required=False, default=1)
-    args = parser.parse_args()
-    return args
 
 
 # Calculate the if a field is observable for a given night
@@ -286,10 +290,15 @@ def main():
     night_starts = args.night_starts
     night_ends = args.night_ends
     field_file = args.fields
+    output_file = args.output_file
 
-    path_to_final_output = os.path.join(workdir,
-                                        'tiles_nc_density_%s-%s.csv' %
-                                        (night_starts, night_ends))
+    if output_file is None:
+        path_to_final_output = os.path.join(workdir,
+                                            'tiles_nc_density_%s_%s.csv' %
+                                            (night_starts, night_ends))
+    else:
+        path_to_final_output = os.path.join(workdir, output_file)
+
     if os.path.isfile(path_to_final_output):
         logger.info(' ' +
                     datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
