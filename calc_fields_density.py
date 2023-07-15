@@ -51,8 +51,6 @@ def parser():
                         type=str, required=False, default=os.getcwd())
     parser.add_argument('-n', '--ncores', help='Number of cores',
                         type=int, required=False, default=1)
-    parser.add_argument('-s', '--sym_file', help='Ouput file from symulation',
-                        required=True)
     parser.add_argument('-op', '--output_plot', help='Name of the output plot',
                         required=False)
     parser.add_argument('-v', '--verbose', help='Verbose mode',
@@ -63,6 +61,9 @@ def parser():
     parser.add_argument('-t', '--oper_type', help='Type of operation. Valid \
                         options are: calc, plot or both', type=str,
                         required=False, default='both')
+    # add argument to require sym_file if --oper_type=plot
+    parser.add_argument('-s', '--sym_file', help='Ouput file from symulation',
+                        required=False)
 
     args = parser.parse_args()
 
@@ -233,12 +234,12 @@ def calc_field_track(f, night_starts, tab_name):
 
 
 def generate_date_range(start_date, end_date):
-    date_range = []
+    date_range = [start_date.strftime('%Y-%m-%d')]
     current_date = start_date
 
     while current_date <= end_date:
-        date_range.append(current_date.strftime('%Y-%m-%d'))
         current_date += timedelta(days=1)
+        date_range.append(current_date.strftime('%Y-%m-%d'))
 
     return date_range
 
@@ -262,8 +263,8 @@ def run_calc_field_track(workdir, f, night_range):
                 calc_field_track(f, night, tab_name)
             else:
                 logger.info(' ' + datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S") + ' - table', tab_name, 'already \
-                    exists')
+                    "%Y-%m-%d %H:%M:%S") + ' - table %s already exists' %
+                    tab_name)
 
 
 def stack_tables(workdir, night_range, path_to_final_output):
@@ -330,7 +331,7 @@ def main_sym(args):
                     for %s to %s' %
                     (path_to_final_output, night_starts, night_ends))
 
-    f = ascii.read(field_file)
+    f = ascii.read(os.path.join(workdir, field_file))
 
     # calculate a range of dates between night_starts and night_ends
     start_date = Time(night_starts)
@@ -509,7 +510,10 @@ if __name__ == '__main__':
         operation = args.oper_type
 
     if operation == 'plot':
-        main_plot(args)
+        if args.sym_file is None:
+            raise ValueError('You must provide a sym file to plot.')
+        else:
+            main_plot(args)
     elif operation == 'sym':
         main_sym(args)
     elif operation == 'both':
