@@ -323,7 +323,7 @@ def main_sym(args):
                     datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
                     ' The output file %s already exists. Exiting.' %
                     path_to_final_output)
-        sys.exit()
+        return
     else:
         logger.info(' ' +
                     datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
@@ -397,8 +397,8 @@ def check_dates(workdir, fname, start_date, end_date):
         start_date = Time(start_date)
         end_date = Time(end_date)
     except ValueError:
-        raise ValueError('Invalid date format for start_date or end_date \
-                         or date not in calendar')
+        raise ValueError(
+            'Invalid date format for start_date or end_date or date not in calendar')
 
     f = ascii.read(os.path.join(workdir, fname))
     dates = f.keys()
@@ -406,8 +406,6 @@ def check_dates(workdir, fname, start_date, end_date):
         raise ValueError('Start date not in the input file')
     if end_date not in dates:
         raise ValueError('End date not in the input file')
-
-# create function to plot the tile density using the input file
 
 
 def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, save):
@@ -426,6 +424,11 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, 
     days = [date.datetime.day for date in dates if start_date <= date <= end_date]
     if verbose:
         print("Days extracted within the specified range.")
+    # make a list of months
+    months = np.unique(
+        [date.datetime.month for date in dates if start_date <= date <= end_date])
+    if verbose:
+        print("Months extracted within the specified range.")
     # make a list of year-month
     myear = [date.datetime.strftime("%Y-%m")
              for date in dates if start_date <= date <= end_date]
@@ -445,9 +448,10 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, 
         print("Plotting the tile density.")
 
     # plot the tile density
-    plt.figure(figsize=(10, 5))
+    h = int(len(months) / 2) if int(len(months) / 2) >= 1 else 1
+    plt.figure(figsize=(16, h))
     sc = plt.scatter(days[:-1], myear[:-1], c=nfields[:-1], cmap='hot_r',
-                     edgecolor='none', marker='s', s=200)  # , vmin=0, vmax=24)
+                     edgecolor='none', marker='s', s=400)
 
     cb = plt.colorbar(sc)
     cb.set_label('$\mathrm{Ntiles / night}$', fontsize=18)
@@ -471,8 +475,7 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, 
             print('Saving figure output to %s' % outputname)
         plt.savefig(os.path.join(workdir, outputname), format='png',
                     bbox_inches='tight', dpi=150)
-        if verbose:
-            print('Figure saved successfully.')
+        print('Figure saved successfully to %s' % outputname)
     else:
         if verbose:
             print('Plot was not saved. If you want to save it, use the -s option.')
@@ -511,11 +514,25 @@ if __name__ == '__main__':
 
     if operation == 'plot':
         if args.sym_file is None:
-            raise ValueError('You must provide a sym file to plot.')
-        else:
-            main_plot(args)
+            sym_path = os.path.join(args.workdir,
+                                    'tiles_nc_density_%s_%s.csv' %
+                                    (args.start_date, args.end_date))
+            if os.path.isfile(sym_path):
+                args.sym_file = sym_path
+            else:
+                raise ValueError(
+                    'Symulation file not found or dats are out of range.')
+
+        main_plot(args)
+
     elif operation == 'sym':
         main_sym(args)
-    elif operation == 'both':
+    else:
         main_sym(args)
+        sym_path = os.path.join(args.workdir,
+                                'tiles_nc_density_%s_%s.csv' %
+                                (args.start_date, args.end_date))
+        args.sym_file = sym_path if args.sym_file is None else args.sym_file
+        args.output_plot = 'tile_density_%s_%s.png' % (
+            args.start_date, args.end_date) if args.output_plot is None else args.output_plot
         main_plot(args)
