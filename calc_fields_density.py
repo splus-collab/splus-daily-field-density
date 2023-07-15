@@ -9,6 +9,7 @@ Description: Calculate the density of fields for a
 given night within a user-defined period of time.
 """
 
+from __future__ import print_function
 import numpy as np
 import astropy
 import astropy.units as u
@@ -25,18 +26,23 @@ import multiprocessing as mp
 import logging
 # import warnings
 import colorlog
-
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+mpl.style.use('classic')
 
 # create a parser function to get user args for init and end dates
+
+
 def parser():
     """Take care of all the argparse stuff."""
     parser = argparse.ArgumentParser(
         description='Calculate the density of fields for a given night within \
         a user-defined period of time.')
-    parser.add_argument('-ns', '--night_starts',
-                        help='Night starts', type=str, required=True)
-    parser.add_argument('-ne', '--night_ends',
-                        help='Night ends', type=str, required=True)
+    parser.add_argument('-ns', '--start_date',
+                        help='Date to start symulation and/or plot',
+                        type=str, required=True)
+    parser.add_argument('-ne', '--end_date', help='End date to symulation \
+                        and/or plot', type=str, required=True)
     parser.add_argument('-f', '--fields', help='S-PLUS fields file',
                         type=str, required=True)
     parser.add_argument('-o', '--output_file', help='Output file',
@@ -45,6 +51,19 @@ def parser():
                         type=str, required=False, default=os.getcwd())
     parser.add_argument('-n', '--ncores', help='Number of cores',
                         type=int, required=False, default=1)
+    parser.add_argument('-s', '--sym_file', help='Ouput file from symulation',
+                        required=True)
+    parser.add_argument('-op', '--output_plot', help='Name of the output plot',
+                        required=False)
+    parser.add_argument('-v', '--verbose', help='Verbose mode',
+                        required=False, action='store_true')
+    parser.add_argument('-sp', '--save_plot', help='Save figure',
+                        required=False, action='store_true')
+    # add argument to chose if calc, plot or both
+    parser.add_argument('-t', '--oper_type', help='Type of operation. Valid \
+                        options are: calc, plot or both', type=str,
+                        required=False, default='both')
+
     args = parser.parse_args()
 
     return args
@@ -279,15 +298,14 @@ def stack_tables(workdir, night_range, path_to_final_output):
              overwrite=True)
 
 
-def main():
+def main_sym(args):
     """Main function."""
     call_logger()
     logger = logging.getLogger(__name__)
 
-    args = parser()
     workdir = args.workdir
-    night_starts = args.night_starts
-    night_ends = args.night_ends
+    night_starts = args.start_date
+    night_ends = args.end_date
     field_file = args.fields
     output_file = args.output_file
     num_procs = args.ncores
@@ -370,5 +388,130 @@ def main():
     stack_tables(workdir, date_range, path_to_final_output)
 
 
+def check_dates(workdir, fname, start_date, end_date):
+    # create function to check if start_date and end_date are within the input file
+    """Check if start_date and end_date are within the input file"""
+    # check is start_date and end_date are valid dates
+    try:
+        start_date = Time(start_date)
+        end_date = Time(end_date)
+    except ValueError:
+        raise ValueError('Invalid date format for start_date or end_date \
+                         or date not in calendar')
+
+    f = ascii.read(os.path.join(workdir, fname))
+    dates = f.keys()
+    if start_date not in dates:
+        raise ValueError('Start date not in the input file')
+    if end_date not in dates:
+        raise ValueError('End date not in the input file')
+
+# create function to plot the tile density using the input file
+
+
+def plot_density(workdir, finput, ffoot, start_date, end_date, output, verbose, save):
+    """Plot the tile density using the input file"""
+    # read the input file and the footprint file
+    fi = ascii.read(os.path.join(workdir, finput))
+    foot = ascii.read(os.path.join(workdir, ffoot))
+    if verbose:
+        print("Input file and footprint file read successfully.")
+
+    # get the list of dates
+    dates = [Time(key) for key in fi.keys() if '-' in key]
+    if verbose:
+        print("Dates extracted from the input file.")
+    # make a list of days
+    days = [date.datetime.day for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Days extracted within the specified range.")
+    # make a list of year-month
+    myear = [date.datetime.strftime("%Y-%m")
+             for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Year-month extracted within the specified range.")
+
+    # make mask all non-observed tiles
+    mask = (foot['STATUS'] == 0) | (foot['STATUS'] == 3)
+    if verbose:
+        print("Mask created for non-observed tiles.")
+
+    # make a list of number of fields
+    nfields = [int(fi[date.datetime.strftime("%Y-%m-%d")][mask].sum())
+               for date in dates if start_date <= date <= end_date]
+    if verbose:
+        print("Number of fields calculated within the specified range.")
+        print("Plotting the tile density.")
+
+    # plot the tile density
+    plt.figure(figsize=(10, 5))
+    sc = plt.scatter(days[:-1], myear[:-1], c=nfields[:-1], cmap='hot_r',
+                     edgecolor='none', marker='s', s=200)  # , vmin=0, vmax=24)
+
+    cb = plt.colorbar(sc)
+    cb.set_label('$\mathrm{Ntiles / night}$', fontsize=18)
+
+    plt.xlabel('$\mathrm{Day}$', fontsize=18)
+    plt.ylabel('$\mathrm{Year-month}$', fontsize=18)
+    plt.xlim(0, 32)
+    plt.gca().invert_yaxis()
+    plt.grid()
+    plt.title('$\mathrm{Total\ of\ tiles\ remaining\ as\ of\ %s:\ %i}$' %
+              (datetime.datetime.now().strftime("%Y/%m/%d"),
+               foot['NAME'][~mask].size), fontsize=16)
+
+    plt.tight_layout()
+
+    if save:
+        outputname = output if output else 'tile_density_%s_%s.png' % (
+            start_date, end_date)
+        # make verbose
+        if verbose:
+            print('Saving figure output to %s' % outputname)
+        plt.savefig(os.path.join(workdir, outputname), format='png',
+                    bbox_inches='tight', dpi=150)
+        if verbose:
+            print('Figure saved successfully.')
+    else:
+        if verbose:
+            print('Plot was not saved. If you want to save it, use the -s option.')
+
+    if verbose:
+        print('Showing plot.')
+    plt.show()
+
+
+def main_plot(args):
+    """Main function"""
+    # get the arguments
+    finput = args.sym_file
+    ffoot = args.fields
+    start_date = args.start_date
+    end_date = args.end_date
+    output = args.output_plot
+    verbose = args.verbose
+    save = args.save_plot
+    workdir = args.workdir
+
+    # check if start_date and end_date are within the input file
+    check_dates(workdir, finput, start_date, end_date)
+
+    # plot the tile density using the input file
+    plot_density(workdir, finput, ffoot, start_date,
+                 end_date, output, verbose, save)
+
+
 if __name__ == '__main__':
-    main()
+    args = parser()
+    if args.oper_type not in ['plot', 'sym', 'both']:
+        raise ValueError('Invalid operation type. Use plot, sym or both.')
+    else:
+        operation = args.oper_type
+
+    if operation == 'plot':
+        main_plot(args)
+    elif operation == 'sym':
+        main_sym(args)
+    elif operation == 'both':
+        main_sym(args)
+        main_plot(args)
