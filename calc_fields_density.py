@@ -4,15 +4,13 @@
 Created on Mon Apr  6 11:00:00 2020
 Last modified on Mon Jul 17 2023
 Author: Fabio R Herpich
+Email: fabio.herpich@ast.cam.ac.uk
+Company: CASU / Institute of Astronomy - University of Cambridge
+Copyrigth: Fabio R Herpich - 2023 - All rights reserved
 Github: https://github.com/splus-collab/splus-daily-field-density
 Description: Calculate the density of fields for a
 given night within a user-defined period of time.
 """
-
-__author__ = 'Fabio R Herpich'
-__version__ = '{tag}'
-__date__ = '2023-07-17'
-__email__ = 'fabio.herpich@ast.cam.ac.uk'
 
 from __future__ import print_function
 import numpy as np
@@ -34,11 +32,18 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 mpl.style.use('classic')
 
+__author__ = 'Fabio R Herpich'
+__version__ = '{tag}'
+__date__ = '2023-07-17'
+__email__ = 'fabio.herpich@ast.cam.ac.uk'
+
 # create a parser function to get user args for init and end dates
 
 
 def parser():
-    """Take care of all the argparse stuff."""
+    """
+    Parse the user arguments.
+    """
     parser = argparse.ArgumentParser(
         description='Calculate the density of fields for a given night within \
         a user-defined period of time.')
@@ -73,6 +78,8 @@ def parser():
                         help='Date of S-PLUS observations last update.\
                         Format YYYY-MM-DD (default: today)',
                         required=False, type=str)
+    # if no arguments were passed, show help and exit without error
+    parser.print_help()
 
     args = parser.parse_args()
 
