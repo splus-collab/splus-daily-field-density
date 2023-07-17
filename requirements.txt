@@ -1,0 +1,8 @@
+numpy
+astropy
+datetime
+argparse
+multiprocessing
+logging
+colorlog
+matplotlib
