@@ -74,12 +74,13 @@ def parser():
     parser.add_argument('-s', '--sym_file', help='Ouput file from symulation',
                         required=False)
     # add argument to receive the date of table last update
-    parser.add_argument('-u', '--update_date',
+    parser.add_argument('-u', '--last_update',
                         help='Date of S-PLUS observations last update.\
                         Format YYYY-MM-DD (default: today)',
                         required=False, type=str)
     # if no arguments were passed, show help and exit without error
-    parser.print_help()
+    if len(sys.argv) == 1:
+        parser.print_help()
 
     args = parser.parse_args()
 
