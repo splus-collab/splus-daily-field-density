@@ -1,4 +1,3 @@
-```
 # calc_fields_density
 
 ![Example Output Plot](data/tile_density_2023-08-01_2024-07-31.png)
