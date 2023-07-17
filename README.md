@@ -61,7 +61,7 @@ The `calc_fields_density.py` script calculates the observability of a set of fie
    All files needed to run the previous line are included. To avoid calculating the full symulation, the plot cal be
    done providing the sym_file with ```bash --sym_file name_of_sym_file.csv```. The file must be in the workdir.
 
-### NOTE: The repository contains a CSV file with the symulation for 2 years, hence not requiring the user to spend do it to obtain the plot
+### NOTE: The repository contains a CSV file with the simulation for 2 years, hence not requiring the user to spend time doing it to obtain the plot.
 
 ## Example Output
 
