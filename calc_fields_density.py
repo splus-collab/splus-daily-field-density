@@ -28,12 +28,15 @@ import argparse
 import multiprocessing as mp
 import logging
 import colorlog
+import subprocess
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 mpl.style.use('classic')
 
 __author__ = 'Fabio R Herpich'
-__version__ = '{tag}'
+latest_tag = subprocess.check_output(
+    ['git', 'describe', '--tags']).decode('utf-8').strip()
+__version__ = latest_tag.lstrip('v')
 __date__ = '2023-07-17'
 __email__ = 'fabio.herpich@ast.cam.ac.uk'
 
