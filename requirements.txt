@@ -2,6 +2,5 @@ numpy
 astropy
 datetime
 argparse
-logging
 colorlog
 matplotlib
