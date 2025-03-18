@@ -2,5 +2,5 @@ numpy
 astropy
 datetime
 argparse
-colorlog
 matplotlib
+pandas
