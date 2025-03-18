@@ -2,48 +2,47 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Apr  6 11:00:00 2020
-Last modified on Mon Jul 17 2023
+Last modified on Wed March 12 2025
 Author: Fabio R Herpich
-Email: fabio.herpich@ast.cam.ac.uk
-Company: CASU / Institute of Astronomy - University of Cambridge
-Copyrigth: Fabio R Herpich - 2023 - All rights reserved
+Email: fherpich@lna.br
+Company: Laboratorio Nacional de Astrofisica - LNA
+Copyrigth: Fabio R Herpich - 2025 - All rights reserved
 Github: https://github.com/splus-collab/splus-daily-field-density
 Description: Calculate the density of fields for a
 given night within a user-defined period of time.
 """
 
 from __future__ import print_function
+import matplotlib.pyplot as plt
 import numpy as np
-import astropy
 import astropy.units as u
-from astropy.io import ascii
 from astropy.table import Table
 from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_sun
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_body
+import pandas as pd
 import datetime
 from datetime import timedelta
 import os
 import sys
 import argparse
-import multiprocessing as mp
+from multiprocessing import Pool
+from itertools import repeat
 import logging
-import colorlog
+from time import perf_counter
 import subprocess
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-mpl.style.use('classic')
+plt.style.use('classic')
 
 __author__ = 'Fabio R Herpich'
 latest_tag = subprocess.check_output(
     ['git', 'describe', '--tags']).decode('utf-8').strip()
 __version__ = latest_tag.lstrip('v')
-__date__ = '2023-07-17'
-__email__ = 'fabio.herpich@ast.cam.ac.uk'
+__date__ = '2025-03-18'
+__email__ = 'fherpich@lna.br'
 
 # create a parser function to get user args for init and end dates
 
 
-def parser():
+def args_parser():
     """
     Parse the user arguments.
     """
@@ -57,31 +56,31 @@ def parser():
                         and/or plot', type=str, required=True)
     parser.add_argument('-f', '--fields', help='S-PLUS fields file',
                         type=str, required=True)
-    parser.add_argument('-o', '--output_file', help='Output file',
-                        type=str, required=False)
+    parser.add_argument('-o', '--output_file', help='Output filename for the\
+                        table containing the field density',
+                        type=str, required=False, default='tile_density.csv')
     parser.add_argument('-w', '--workdir', help='Working directory',
                         type=str, required=False, default=os.getcwd())
-    parser.add_argument('-n', '--ncores', help='Number of cores',
+    parser.add_argument('--outdir', help='Output directory',
+                        type=str, required=False, default=os.getcwd())
+    parser.add_argument('-n', '--nprocs', help='Number of processes to spawn',
                         type=int, required=False, default=1)
     parser.add_argument('-op', '--output_plot', help='Name of the output plot',
-                        required=False)
-    parser.add_argument('-v', '--verbose', help='Verbose mode',
-                        required=False, action='store_true')
+                        required=False, default='tile_density.png')
     parser.add_argument('-sp', '--save_plot', help='Save figure',
                         required=False, action='store_true')
-    # add argument to chose if calc, plot or both
     parser.add_argument('-t', '--oper_type', help='Type of operation. Valid \
-                        options are: calc, plot or both', type=str,
+                        options are: sym, plot or both', type=str,
                         required=False, default='both')
-    # add argument to require sym_file if --oper_type=plot
     parser.add_argument('-s', '--sym_file', help='Ouput file from symulation',
-                        required=False)
-    # add argument to receive the date of table last update
+                        required=False, default=None)
     parser.add_argument('-u', '--last_update',
                         help='Date of S-PLUS observations last update.\
                         Format YYYY-MM-DD (default: today)',
                         required=False, type=str)
-    # if no arguments were passed, show help and exit without error
+    parser.add_argument('--loglevel', help='Set the log level. Options are:\
+                        DEBUG, INFO, WARNING, ERROR, CRITICAL',
+                        required=False, default='INFO')
     if len(sys.argv) == 1:
         parser.print_help()
 
@@ -92,37 +91,29 @@ def parser():
 
 # use a function to restart the logger before every run
 
-def call_logger():
-    """Configure the logger."""
-    # reset logging config
-    logging.shutdown()
-    logging.root.handlers.clear()
+def call_logger(logfile=None, loglevel=logging.INFO):
 
-    # configure the module with colorlog
-    logger = colorlog.getLogger()
-    logger.setLevel(logging.INFO)
+    logger = logging.getLogger(__name__)
 
-    # create a formatter with green color for INFO level
-    formatter = colorlog.ColoredFormatter(
-        '%(log_color)s%(levelname)s:%(name)s:%(message)s',
-        log_colors={
-            'DEBUG':    'cyan',
-            'INFO':     'blue',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white',
-        })
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] @%(module)s.%(funcName)s() %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S")
 
-    # create handler and set the formatter
-    ch = logging.StreamHandler()
-    ch.setFormatter(formatter)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(loglevel)
+    if logfile is not None:
+        file_handler = logging.FileHandler(logfile)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
-    # add the handler to the logger
-    logger.addHandler(ch)
-
+    return logger
 
 # Calculate the if a field is observable for a given night
-def calc_field_track(f, night_starts, tab_name):
+
+
+def calc_field_track(f, night_starts, logger=logging.getLogger(__name__)):
     """
     Calculate the observability of a field for a given night.
     Parameters:
@@ -140,18 +131,13 @@ def calc_field_track(f, night_starts, tab_name):
     - observable (bool): True if the field is observable, False otherwise.
     """
 
-    call_logger()
-    logger = logging.getLogger(__name__)
-
     # warn user that site is hardcoded to CTIO
-    logger.warning(datetime.datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
-    # warnings.warn(datetime.datetime.now().strftime(
-    #     "%Y-%m-%d %H:%M:%S") + ' - Site is set to CTIO')
+    logger.warning('Site is set to CTIO')
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 * u.deg, height=2200*u.m)
     utcoffset = 0 * u.hour
 
-    ns = Time('%s 00:00:00' % night_starts).datetime
+    logger.info('night_starts is:', night_starts)
+    ns = Time('%s 00:00:00' % night_starts, format='iso').datetime
     inithour = '23:59:00'
     night_starts = ns.strftime("%Y-%m-%d")
     ne = ns + datetime.timedelta(days=1)
@@ -163,12 +149,12 @@ def calc_field_track(f, night_starts, tab_name):
 
     times_time_overnight = midnight + delta_midnight
     frame_time_overnight = AltAz(obstime=times_time_overnight, location=mysite)
-    sunaltazs_time_overnight = get_sun(
-        times_time_overnight).transform_to(frame_time_overnight)
+    sunaltazs_time_overnight = get_body('sun', times_time_overnight, mysite).transform_to(
+        frame_time_overnight)
 
     # moon phase
-    sun_pos = get_sun(set_time)
-    moon_pos = get_moon(set_time)
+    sun_pos = get_body('sun', set_time, mysite)
+    moon_pos = get_body('moon', set_time, mysite)
     elongation = sun_pos.separation(moon_pos)
     moon_phase = np.arctan2(sun_pos.distance*np.sin(elongation),
                             moon_pos.distance - sun_pos.distance*np.cos(elongation))
@@ -178,18 +164,17 @@ def calc_field_track(f, night_starts, tab_name):
                               18*u.deg].min().value
     endvalue = delta_midnight[sunaltazs_time_overnight.alt < -
                               18*u.deg].max().value
-    is_observable = np.zeros(f['NAME'].size)
+    is_observable = np.zeros(f['NAME'].size).astype(int)
 
-    for i in range(f['RA'].size):
-        mycoords = SkyCoord(ra=f['RA'][i], dec=f['DEC'][i],
+    i = 0
+    for index in f.index:
+        mycoords = SkyCoord(ra=f['RA'][index], dec=f['DEC'][index],
                             unit=(u.hourangle, u.deg))
-        if (moon_pos.separation(mycoords).value < 50):
-            logger.info(' ' + datetime.datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S") + ' - ' + f['NAME'][i] + ' - moon \
-                separation: ' + str(moon_pos.separation(mycoords).value))
-        elif (moon_brightness >= .85):
-            if (f['NAME'][i].split('-')[-1][0] not in ['b', 'd']):
-
+        if (moon_pos.separation(mycoords).value < 40):
+            logger.info(f['NAME'][index] + ' - moon separation: ' +
+                        str(moon_pos.separation(mycoords).value))
+        elif (moon_brightness >= .65):
+            if 'SPLUS-b' in f['NAME'][index] or 'SPLUS-d' in f['NAME'][index]:
                 myaltazs_time_overnight = mycoords.transform_to(
                     frame_time_overnight)
                 mask = myaltazs_time_overnight.alt.value > 35.
@@ -202,65 +187,53 @@ def calc_field_track(f, night_starts, tab_name):
                     time_on_the_sky = on_the_sky.max() - on_the_sky.min()
                     if time_on_the_sky > 2.:
                         is_observable[i] = 1
-                        print(datetime.datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"),
-                            f['NAME'][i], night_starts,
-                            'state: on the sky:', time_on_the_sky, 'h')
+                        logger.info(f['NAME'][index], night_starts,
+                                    'state: on the sky:', time_on_the_sky, 'h')
                     else:
-                        print(datetime.datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"),
-                            f['NAME'][i], night_starts, 'state: too \
+                        logger.info(f['NAME'][index], night_starts, 'state: too \
                             low:', time_on_the_sky, 'h')
                 else:
-                    print(datetime.datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"),
-                        f['NAME'][i], night_starts, 'state: not on the sky')
+                    logger.info(f['NAME'][index], night_starts,
+                                'state: not on the sky')
             else:
-                print(datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"),
-                    f['NAME'][i], night_starts, 'state: moon or separation; \
+                logger.info(f['NAME'][index], night_starts, 'state: moon or separation; \
                     moon', moon_brightness, 'sep:\
                     ', moon_pos.separation(mycoords).value)
         else:
-
-            myaltazs_time_overnight = mycoords.transform_to(
-                frame_time_overnight)
-            mask = myaltazs_time_overnight.alt.value > 35.
-            mask &= (delta_midnight.value > inivalue) & (
-                delta_midnight.value < endvalue)
-
-            on_the_sky = delta_midnight.value[mask]
-
-            if len(on_the_sky) > 1:
-                time_on_the_sky = on_the_sky.max() - on_the_sky.min()
-                if time_on_the_sky > 2.:
-                    is_observable[i] = 1
-                    print(datetime.datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"),
-                        f['NAME'][i], night_starts,
-                        'state: on the sky:\
-                          ', time_on_the_sky, 'h')
-                else:
-                    print(datetime.datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"),
-                        f['NAME'][i], night_starts,
-                        'state: too low:\
-                          ', time_on_the_sky, 'h')
+            if 'SPLUS-b' in f['NAME'][index] or 'SPLUS-d' in f['NAME'][index]:
+                logger.info(f['NAME'][index], 'is galactic. Skipping')
             else:
-                print(datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"),
-                    f['NAME'][i], night_starts, 'state: not on the sky')
+                myaltazs_time_overnight = mycoords.transform_to(
+                    frame_time_overnight)
+                mask = myaltazs_time_overnight.alt.value > 35.
+                mask &= (delta_midnight.value > inivalue) & (
+                    delta_midnight.value < endvalue)
+
+                on_the_sky = delta_midnight.value[mask]
+
+                if len(on_the_sky) > 1:
+                    time_on_the_sky = on_the_sky.max() - on_the_sky.min()
+                    if time_on_the_sky > 2.:
+                        is_observable[i] = 1
+                        logger.info(f['NAME'][index], night_starts,
+                                    'state: on the sky:\
+                            ', time_on_the_sky, 'h')
+                    else:
+                        logger.info(f['NAME'][index], night_starts,
+                                    'state: too low:', time_on_the_sky, 'h')
+                else:
+                    logger.info(f['NAME'][index], night_starts,
+                                'state: not on the sky')
+        i += 1
 
     t = Table([f['NAME'], is_observable], names=['NAME', night_starts],
               dtype=['S20', 'i1'])
 
-    print(datetime.datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"), 'Saving table', tab_name)
-
-    ascii.write(t, tab_name, format='csv', overwrite=True)
+    t = t.to_pandas()
+    return t
 
 
-def generate_date_range(start_date, end_date):
+def generate_date_range(start_date, end_date, logger=logging.getLogger(__name__)):
     """
     Generate a list of dates between a start and end date.
     start_date and end_date must be datetime objects.
@@ -272,42 +245,29 @@ def generate_date_range(start_date, end_date):
     while current_date <= end_date:
         current_date += timedelta(days=1)
         date_range.append(current_date.strftime('%Y-%m-%d'))
+    logger.debug('Generated %i dates between %s and %s' %
+                 (len(date_range), start_date, end_date))
 
     return date_range
 
 
-def run_calc_field_track(workdir, f, night_range):
+def run_calc_field_track(f, night, logger=logging.getLogger(__name__)):
     """
     Run the calc_field_track function for a range of nights.
+
     workdir: path to the working directory
     f: table of the fields
     night_range: list of nights to calculate
-    Returns: None
-    This function will create a table for each night in the night_range
-    and save it in the workdir/outputs directory.
+
+    Returns:
+    Observability of the fields for the given night
     """
 
-    call_logger()
-    logger = logging.getLogger(__name__)
-
-    outdir = os.path.join(workdir, 'outputs')
-    if os.path.isdir(outdir) is False:
-        os.mkdir(outdir)
-
-    for night in night_range:
-        if night == 'dummydate':
-            continue
-        else:
-            tab_name = os.path.join(outdir, night + '.csv')
-            if os.path.isfile(tab_name) is False:
-                calc_field_track(f, night, tab_name)
-            else:
-                logger.info(' ' + datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S") + ' - table %s already exists' %
-                    tab_name)
+    logger.info('Starting calc_field_track for %s' % night)
+    return calc_field_track(f, night, logger=logger)
 
 
-def stack_tables(workdir, night_range, path_to_final_output):
+def stack_tables(results, path_to_final_output, logger=logging.getLogger(__name__)):
     """
     Stack the tables for the different nights.
     workdir: path to the working directory
@@ -318,45 +278,22 @@ def stack_tables(workdir, night_range, path_to_final_output):
     night_range and save it in the path_to_final_output directory.
     """
 
-    call_logger()
-    logger = logging.getLogger(__name__)
+    final_table = results[0].copy()
+    for df in results[1:]:
+        final_table = final_table.merge(df, on='NAME', how='outer')
 
-    outdir = os.path.join(workdir, 'outputs')
-    if os.path.isdir(outdir) is False:
-        os.mkdir(outdir)
-
-    for night in night_range:
-        if night == 'dummydate':
-            continue
-        else:
-            tab_name = os.path.join(outdir, night + '.csv')
-            if os.path.isfile(tab_name) is False:
-                logger.error(' ' + datetime.datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S") + ' - Table', tab_name, 'does \
-                    not exist')
-                sys.exit(1)
-            else:
-                t = ascii.read(tab_name)
-                if night == night_range[0]:
-                    t0 = t
-                else:
-                    t0 = astropy.table.join(t0, t, keys='NAME',
-                                            join_type='outer')
-
-    t0.write(os.path.join(workdir, path_to_final_output), format='csv',
-             overwrite=True)
+    logger.info(' Stacking the tables into %s' %
+                path_to_final_output)
+    final_table.to_csv(path_to_final_output, index=False)
 
 
-def main_sym(args):
+def main_sym(args, logger=logging.getLogger(__name__)):
     """
     Main function to calculate the field track. This function will
     calculate the field track for a range of nights and save the
     results in a CSV table. It will itereate over the nights and
     calculate the field track for each night. Then it will stack the
-    tables for the different nights and save the final table.
-    The iteration is done in parallel using the multiprocessing
-    module. The number of cores to use can be specified with the
-    --ncores argument. The default is to use 1 core.
+    results for the different nights and save the final table.
 
     Args:
         args: arguments from the command line
@@ -364,92 +301,75 @@ def main_sym(args):
     Returns:
         None
     """
-    call_logger()
-    logger = logging.getLogger(__name__)
-
     workdir = args.workdir
     night_starts = args.start_date
     night_ends = args.end_date
     field_file = args.fields
     output_file = args.output_file
-    num_procs = args.ncores
+    num_procs = args.nprocs
 
     if output_file is None:
-        path_to_final_output = os.path.join(workdir,
-                                            'tiles_nc_density_%s_%s.csv' %
-                                            (night_starts, night_ends))
+        logger.debug('Creating output file name')
+        path_to_final_output = os.path.join(args.workdir,
+                                            args.output_file)
     else:
+        logger.info('Using output file name %s' % output_file)
         path_to_final_output = os.path.join(workdir, output_file)
 
     if os.path.isfile(path_to_final_output):
-        logger.info(' ' +
-                    datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
-                    ' The output file %s already exists. Exiting.' %
-                    path_to_final_output)
+        logger.warning('The output file %s already exists. Exiting.' %
+                       path_to_final_output)
         return
     else:
-        logger.info(' ' +
-                    datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
-                    ' The output file %s does not exist. Running silulation\
+        logger.info('The output file %s does not exist. Running silulation\
                     for %s to %s' %
                     (path_to_final_output, night_starts, night_ends))
 
-    f = ascii.read(os.path.join(workdir, field_file))
+    try:
+        footprint = pd.read_csv(os.path.join(workdir, field_file))
+        logger.info('Footprint file read successfully')
+    except FileNotFoundError:
+        logger.error('Footprint file not found. Exiting.')
+        return
+    mask_todo = footprint['STATUS'] == -5
+    mask_todo |= footprint['STATUS'] == -2
+    mask_todo |= footprint['STATUS'] == -1
+    mask_todo |= footprint['STATUS'] == 0
+    mask_todo |= footprint['STATUS'] == 3
+    mask_todo |= footprint['STATUS'] == 5
+
+    f = footprint[mask_todo]
 
     # calculate a range of dates between night_starts and night_ends
     start_date = Time(night_starts)
     end_date = Time(night_ends)
     date_range = generate_date_range(start_date, end_date)
+    logger.debug('Dates generated successfully')
 
-    # find the for which len(date_range) % num_procs == 0
+    if num_procs < 2 or args.loglevel == 'DEBUG':
+        logger.warning(
+            'Running in single process mode. This may take a while.')
+        results = []
+        for date in date_range:
+            out_df = run_calc_field_track(f, date, logger=logger)
+            results.append(out_df)
+            if args.loglevel == 'DEBUG':
+                logger.debug('Results for %s: %s' % (date, out_df))
+                import pdb
+                pdb.set_trace()
+        logger.info('All dates calculated successfully')
+    else:
+        logger.info(
+            'Running in multi-process mode with %i processes' % num_procs)
+        with Pool(num_procs) as pool:
+            results = pool.starmap(run_calc_field_track,
+                                   zip(repeat(f), date_range, repeat(logger)))
+            pool.close()
+            pool.join()
+        logger.info('All dates calculated successfully')
 
-    if len(date_range) % num_procs > 0:
-        increase_to = int(np.ceil(len(date_range) / num_procs)) * num_procs
-        print(datetime.datetime.now().strftime(
-            '%Y-%m-%d %H:%M:%S'),
-            'Increasing the number of days to', increase_to)
-        while len(date_range) < increase_to:
-            print(datetime.datetime.now().strftime(
-                '%Y-%m-%d %H:%M:%S'),
-                'Including a dummy date to make the number of days divisible\
-                by', num_procs)
-            date_range.append('dummydate')
-        else:
-            logger.info(' ' + datetime.datetime.now().strftime(
-                '%Y-%m-%d %H:%M:%S') + ' Dates now meet the requirement\
-                of ncores')
-    dates = np.array(date_range).reshape(
-        (num_procs, int(len(date_range) / num_procs)))
-    print(datetime.datetime.now().strftime(
-        '%Y-%m-%d %H:%M:%S'),
-        'Calculating for a total of', len(date_range), 'days')
-    print(datetime.datetime.now().strftime(
-        '%Y-%m-%d %H:%M:%S'),
-        'Using', num_procs, 'processes')
-
-    jobs = []
-    for date_list in dates:
-        process = mp.Process(target=run_calc_field_track,
-                             args=(workdir, f, date_list))
-        jobs.append(process)
-
-    # start the processes
-    logger.info(' ' + datetime.datetime.now().strftime(
-        '%Y-%m-%d %H:%M:%S') + ' Starting the processes')
-    for j in jobs:
-        j.start()
-
-    # ensure all processes have finished execution
-    for j in jobs:
-        j.join()
-
-    print('All done!')
-
-    # stack the tables
-    logger.info(' ' + datetime.datetime.now().strftime(
-        '%Y-%m-%d %H:%M:%S') + ' Stacking the tables into \
-        %s' % path_to_final_output)
-    stack_tables(workdir, date_range, path_to_final_output)
+    logger.info(' Stacking the tables into %s' % path_to_final_output)
+    stack_tables(results, path_to_final_output, logger=logger)
 
 
 def check_dates(workdir, fname, start_date, end_date):
@@ -463,16 +383,15 @@ def check_dates(workdir, fname, start_date, end_date):
         raise ValueError(
             'Invalid date format for start_date or end_date or date not in calendar')
 
-    f = ascii.read(os.path.join(workdir, fname))
+    f = pd.read_csv(os.path.join(workdir, fname))
     dates = f.keys()
-    if start_date not in dates:
+    if start_date.strftime('%Y-%m-%d') not in dates:
         raise ValueError('Start date not in the input file')
-    if end_date not in dates:
+    if end_date.strftime('%Y-%m-%d') not in dates:
         raise ValueError('End date not in the input file')
 
 
-def plot_density(workdir, finput, ffoot, start_date, end_date, output,
-                 last_update=None, verbose=False, save=False):
+def plot_density(args, logger=logging.getLogger(__name__)):
     """
     Plot the tile density using the input file.
 
@@ -484,7 +403,6 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output,
         end_date (str): The end date.
         output (str): The output file name.
         last_update (str): The last update date.
-        verbose (bool): Whether to print status messages.
         save (bool): Whether to save the plot.
 
     Returns:
@@ -492,43 +410,32 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output,
     """
     # define last date of update
     last_update = datetime.datetime.now().strftime(
-        "%Y/%m/%d") if last_update is None else last_update
+        "%Y/%m/%d") if args.last_update is None else args.last_update
     # read the input file and the footprint file
-    fi = ascii.read(os.path.join(workdir, finput))
-    foot = ascii.read(os.path.join(workdir, ffoot))
-    if verbose:
-        print("Input file and footprint file read successfully.")
+    fi = pd.read_csv(os.path.join(args.workdir, args.sym_file))
+    # foot = pd.read_csv(os.path.join(args.workdir, args.fields))
+    logger.info("Input file and footprint file read successfully.")
 
     # get the list of dates
     dates = [Time(key) for key in fi.keys() if '-' in key]
-    if verbose:
-        print("Dates extracted from the input file.")
+    logger.debug("Dates extracted from the input file.")
     # make a list of days
-    days = [date.datetime.day for date in dates if start_date <= date <= end_date]
-    if verbose:
-        print("Days extracted within the specified range.")
+    days = [date.datetime.day for date in dates if args.start_date <=
+            date <= args.end_date]
+    logger.debug("Days extracted within the specified range.")
     # make a list of months
     months = np.unique(
-        [date.datetime.month for date in dates if start_date <= date <= end_date])
-    if verbose:
-        print("Months extracted within the specified range.")
+        [date.datetime.month for date in dates if args.start_date <= date <= args.end_date])
+    logger.debug("Months extracted within the specified range.")
     # make a list of year-month
     myear = [date.datetime.strftime("%Y-%m")
-             for date in dates if start_date <= date <= end_date]
-    if verbose:
-        print("Year-month extracted within the specified range.")
+             for date in dates if args.start_date <= date <= args.end_date]
+    logger.debug("Year-month extracted within the specified range.")
 
-    # make mask all non-observed tiles
-    mask = (foot['STATUS'] == 0) | (foot['STATUS'] == 3)
-    if verbose:
-        print("Mask created for non-observed tiles.")
-
-    # make a list of number of fields
-    nfields = [int(fi[date.datetime.strftime("%Y-%m-%d")][mask].sum())
-               for date in dates if start_date <= date <= end_date]
-    if verbose:
-        print("Number of fields calculated within the specified range.")
-        print("Plotting the tile density.")
+    nfields = [int(fi[date.datetime.strftime("%Y-%m-%d")].sum())
+               for date in dates if args.start_date <= date <= args.end_date]
+    logger.debug("Number of fields calculated within the specified range.")
+    logger.debug("Plotting the tile density.")
 
     # plot the tile density
     h = int(len(months) / 2) if int(len(months) / 2) >= 1 else 1
@@ -545,53 +452,44 @@ def plot_density(workdir, finput, ffoot, start_date, end_date, output,
     plt.gca().invert_yaxis()
     plt.grid()
     plt.title('$\mathrm{Total\ of\ tiles\ remaining\ as\ of\ %s:\ %i}$' %
-              (last_update, foot['NAME'][mask].size), fontsize=16)
+              (last_update, fi['NAME'].size), fontsize=16)
 
     plt.tight_layout()
 
-    if save:
-        outputname = output if output else 'tile_density_%s_%s.png' % (
-            start_date, end_date)
-        # make verbose
-        if verbose:
-            print('Saving figure output to %s' % outputname)
-        plt.savefig(os.path.join(workdir, outputname), format='png',
+    if args.save_plot:
+        outputname = args.output_plot if args.output_plot is not None else 'tile_density.png'
+        logger.info('Saving figure output to %s' % outputname)
+        plt.savefig(os.path.join(args.outdir, outputname), format='png',
                     bbox_inches='tight', dpi=150)
-        print('Figure saved successfully to %s' % outputname)
+        logger.info('Figure saved successfully to %s' % outputname)
     else:
-        if verbose:
-            print('Plot was not saved. If you want to save it, use the -s option.')
+        logger.warning(
+            'Plot was not saved. If you want to save it, use the -s option.')
 
-    if verbose:
-        print('Showing plot.')
+    logger.debug('Showing plot.')
     plt.show()
 
 
-def main_plot(args):
+def main_plot(args, logger=logging.getLogger(__name__)):
     """
     Main function to plot the tile density using the input file.
     """
     # get the arguments
-    finput = args.sym_file
-    ffoot = args.fields
+    finput = args.output_file
     start_date = args.start_date
     end_date = args.end_date
-    output = args.output_plot
-    verbose = args.verbose
-    save = args.save_plot
     workdir = args.workdir
-    last_update = args.last_update
 
     # check if start_date and end_date are within the input file
     check_dates(workdir, finput, start_date, end_date)
 
-    # plot the tile density using the input file
-    plot_density(workdir, finput, ffoot, start_date,
-                 end_date, output, verbose=verbose, save=save, last_update=last_update)
+    plot_density(args, logger=logger)
 
 
 if __name__ == '__main__':
-    args = parser()
+    start_time = perf_counter()
+    args = args_parser()
+    logger = call_logger(loglevel=args.loglevel)
     if args.oper_type not in ['plot', 'sym', 'both']:
         raise ValueError('Invalid operation type. Use plot, sym or both.')
     else:
@@ -599,25 +497,25 @@ if __name__ == '__main__':
 
     if operation == 'plot':
         if args.sym_file is None:
-            sym_path = os.path.join(args.workdir,
-                                    'tiles_nc_density_%s_%s.csv' %
-                                    (args.start_date, args.end_date))
+            sym_path = os.path.join(args.workdir, args.output_file)
             if os.path.isfile(sym_path):
                 args.sym_file = sym_path
             else:
                 raise ValueError(
-                    'Symulation file not found or dats are out of range.')
+                    'Symulation file not found or dates are out of range.')
 
-        main_plot(args)
+        main_plot(args, logger=logger)
 
     elif operation == 'sym':
-        main_sym(args)
+        main_sym(args, logger=logger)
+        print('Simulation took:', perf_counter() - start_time)
     else:
-        main_sym(args)
-        sym_path = os.path.join(args.workdir,
-                                'tiles_nc_density_%s_%s.csv' %
-                                (args.start_date, args.end_date))
+        main_sym(args, logger=logger)
+        print('Simulation took:', perf_counter() - start_time)
+        sym_path = os.path.join(args.workdir, args.output_file)
         args.sym_file = sym_path if args.sym_file is None else args.sym_file
         args.output_plot = 'tile_density_%s_%s.png' % (
             args.start_date, args.end_date) if args.output_plot is None else args.output_plot
-        main_plot(args)
+        main_plot(args, logger=logger)
+
+    print('Total time:', perf_counter() - start_time)
