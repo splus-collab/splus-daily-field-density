@@ -33,8 +33,9 @@ import subprocess
 plt.style.use('classic')
 
 __author__ = 'Fabio R Herpich'
+path_to_running_file = os.path.dirname(os.path.abspath(__file__))
 latest_tag = subprocess.check_output(
-    ['git', 'describe', '--tags']).decode('utf-8').strip()
+    ['git', 'describe', '--tags'], cwd=path_to_running_file).decode('utf-8').strip()
 __version__ = latest_tag.lstrip('v')
 __date__ = '2025-03-18'
 __email__ = 'fherpich@lna.br'
@@ -91,8 +92,24 @@ def args_parser():
 
 # use a function to restart the logger before every run
 
-def call_logger(logfile=None, loglevel=logging.INFO):
+def call_logger(logfile=None,
+                loglevel=logging.INFO
+                ):
+    """
+    Set the logging level and the output log file
 
+    Parameters
+    ----------
+    logfile : str
+        The name of the log file
+    loglevel : str
+        The logging level
+
+    Returns
+    -------
+    logger : logging.Logger
+        The logger object
+    """
     logger = logging.getLogger(__name__)
 
     handler = logging.StreamHandler()
@@ -110,28 +127,29 @@ def call_logger(logfile=None, loglevel=logging.INFO):
 
     return logger
 
-# Calculate the if a field is observable for a given night
 
-
-def calc_field_track(f, night_starts, logger=logging.getLogger(__name__)):
+def calc_field_track(f: pd.DataFrame,
+                     night_starts: str,
+                     logger=logging.getLogger(__name__)
+                     ):
     """
-    Calculate the observability of a field for a given night.
-    Parameters:
-    - f (astropy.table.Table): Table containing field information.
-    - night_starts (str): Start date of the night in the format 'YYYY-MM-DD'.
-    - tab_name (str): Name of the output table.
-    Returns:
-    None
-    This function calculates the observability of each field in the provided table for a given night.
-    It determines if a field is observable based on various conditions such as the separation from the moon,
-    moon brightness, and altitude of the field during the night. The results are saved in a CSV table.
-    Note: The site is hardcoded to CTIO (Cerro Tololo Inter-American Observatory).
-    Saves a CSV table with the following columns:
-    - field_name (str): Field name.
-    - observable (bool): True if the field is observable, False otherwise.
-    """
+    Calculate the field track for a given night.
 
-    # warn user that site is hardcoded to CTIO
+    Parameters
+    ----------
+    f : pd.DataFrame
+        The footprint file
+    night_starts : str
+        The night to calculate the field track
+    logger : logging.Logger
+        The logger object
+
+    Returns
+    -------
+    t : pd.DataFrame
+        The table with the field track
+    """
+    # TODO: Adapt to any site if required by the user
     logger.warning('Site is set to CTIO')
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 * u.deg, height=2200*u.m)
     utcoffset = 0 * u.hour
@@ -233,11 +251,26 @@ def calc_field_track(f, night_starts, logger=logging.getLogger(__name__)):
     return t
 
 
-def generate_date_range(start_date, end_date, logger=logging.getLogger(__name__)):
+def generate_date_range(start_date: str,
+                        end_date: str,
+                        logger=logging.getLogger(__name__)
+                        ):
     """
-    Generate a list of dates between a start and end date.
-    start_date and end_date must be datetime objects.
-    Returns a list of dates in the format YYYY-MM-DD.
+    Generate a range of dates between start_date and end_date
+
+    Parameters
+    ----------
+    start_date : str
+        The start date
+    end_date : str
+        The end date
+    logger : logging.Logger
+        The logger object
+
+    Returns
+    -------
+    date_range : list
+        The list of dates between start_date and end_date
     """
     date_range = [start_date.strftime('%Y-%m-%d')]
     current_date = start_date
@@ -251,33 +284,47 @@ def generate_date_range(start_date, end_date, logger=logging.getLogger(__name__)
     return date_range
 
 
-def run_calc_field_track(f, night, logger=logging.getLogger(__name__)):
+def run_calc_field_track(f: pd.DataFrame,
+                         night: str,
+                         logger=logging.getLogger(__name__)
+                         ):
     """
-    Run the calc_field_track function for a range of nights.
+    Run the calc_field_track function for a given night
 
-    workdir: path to the working directory
-    f: table of the fields
-    night_range: list of nights to calculate
+    Parameters
+    ----------
+    f : pd.DataFrame
+        The footprint file
+    night : str
+        The night to calculate the field track
+    logger : logging.Logger
+        The logger object
 
-    Returns:
-    Observability of the fields for the given night
+    Returns
+    -------
+    t : pd.DataFrame
+        The table with the field track
     """
-
     logger.info('Starting calc_field_track for %s' % night)
     return calc_field_track(f, night, logger=logger)
 
 
-def stack_tables(results, path_to_final_output, logger=logging.getLogger(__name__)):
+def stack_tables(results: list,
+                 path_to_final_output: str,
+                 logger=logging.getLogger(__name__)
+                 ):
     """
-    Stack the tables for the different nights.
-    workdir: path to the working directory
-    night_range: list of nights to calculate
-    path_to_final_output: path to the final output file
-    Returns: None
-    This function will create a CSV table with all the nights in the
-    night_range and save it in the path_to_final_output directory.
-    """
+    Stack the tables into a single table. Saves the resulting table to disk
 
+    Parameters
+    ----------
+    results : list
+        The list of tables to stack
+    path_to_final_output : str
+        The path to the final output file
+    logger : logging.Logger
+        The logger object
+    """
     final_table = results[0].copy()
     for df in results[1:]:
         final_table = final_table.merge(df, on='NAME', how='outer')
@@ -287,19 +334,18 @@ def stack_tables(results, path_to_final_output, logger=logging.getLogger(__name_
     final_table.to_csv(path_to_final_output, index=False)
 
 
-def main_sym(args, logger=logging.getLogger(__name__)):
+def main_sym(args,
+             logger=logging.getLogger(__name__)
+             ):
     """
-    Main function to calculate the field track. This function will
-    calculate the field track for a range of nights and save the
-    results in a CSV table. It will itereate over the nights and
-    calculate the field track for each night. Then it will stack the
-    results for the different nights and save the final table.
+    Run the simulation for the given dates
 
-    Args:
-        args: arguments from the command line
-
-    Returns:
-        None
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The user arguments
+    logger : logging.Logger
+        The logger object
     """
     workdir = args.workdir
     night_starts = args.start_date
@@ -372,10 +418,25 @@ def main_sym(args, logger=logging.getLogger(__name__)):
     stack_tables(results, path_to_final_output, logger=logger)
 
 
-def check_dates(workdir, fname, start_date, end_date):
-    # create function to check if start_date and end_date are within the input file
-    """Check if start_date and end_date are within the input file"""
-    # check is start_date and end_date are valid dates
+def check_dates(workdir: str,
+                fname: str,
+                start_date: str,
+                end_date: str
+                ):
+    """
+    Check if the start_date and end_date are within the input file
+
+    Parameters
+    ----------
+    workdir : str
+        The working directory
+    fname : str
+        The footprint input file name
+    start_date : str
+        The start date
+    end_date : str
+        The end date
+    """
     try:
         start_date = Time(start_date)
         end_date = Time(end_date)
@@ -391,22 +452,18 @@ def check_dates(workdir, fname, start_date, end_date):
         raise ValueError('End date not in the input file')
 
 
-def plot_density(args, logger=logging.getLogger(__name__)):
+def plot_density(args: argparse.Namespace,
+                 logger=logging.getLogger(__name__)
+                 ):
     """
-    Plot the tile density using the input file.
+    Plot the tile density
 
-    Args:
-        workdir (str): The working directory.
-        finput (str): The input file.
-        ffoot (str): The footprint file.
-        start_date (str): The start date.
-        end_date (str): The end date.
-        output (str): The output file name.
-        last_update (str): The last update date.
-        save (bool): Whether to save the plot.
-
-    Returns:
-        None
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The user arguments
+    logger : logging.Logger
+        The logger object
     """
     # define last date of update
     last_update = datetime.datetime.now().strftime(
@@ -470,9 +527,11 @@ def plot_density(args, logger=logging.getLogger(__name__)):
     plt.show()
 
 
-def main_plot(args, logger=logging.getLogger(__name__)):
+def main_plot(args: argparse.Namespace,
+              logger=logging.getLogger(__name__)
+              ):
     """
-    Main function to plot the tile density using the input file.
+    Run the plot function
     """
     # get the arguments
     finput = args.output_file
