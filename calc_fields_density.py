@@ -61,7 +61,7 @@ def args_parser():
                         table containing the field density',
                         type=str, required=False, default='tile_density.csv')
     parser.add_argument('-w', '--workdir', help='Working directory',
-                        type=str, required=False, default=os.getcwd())
+                        type=str, required=False, default=None)
     parser.add_argument('--outdir', help='Output directory',
                         type=str, required=False, default=os.getcwd())
     parser.add_argument('-n', '--nprocs', help='Number of processes to spawn',
@@ -82,6 +82,8 @@ def args_parser():
     parser.add_argument('--loglevel', help='Set the log level. Options are:\
                         DEBUG, INFO, WARNING, ERROR, CRITICAL',
                         required=False, default='INFO')
+    parser.add_argument('--debug', help='Enable debug mode',
+                        action='store_true', required=False)
     if len(sys.argv) == 1:
         parser.print_help()
 
@@ -154,7 +156,7 @@ def calc_field_track(f: pd.DataFrame,
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8 * u.deg, height=2200*u.m)
     utcoffset = 0 * u.hour
 
-    logger.info('night_starts is:', night_starts)
+    logger.info(f"night_starts received is: {night_starts}")
     ns = Time('%s 00:00:00' % night_starts, format='iso').datetime
     inithour = '23:59:00'
     night_starts = ns.strftime("%Y-%m-%d")
@@ -189,8 +191,8 @@ def calc_field_track(f: pd.DataFrame,
         mycoords = SkyCoord(ra=f['RA'][index], dec=f['DEC'][index],
                             unit=(u.hourangle, u.deg))
         if (moon_pos.separation(mycoords).value < 40):
-            logger.info(f['NAME'][index] + ' - moon separation: ' +
-                        str(moon_pos.separation(mycoords).value))
+            logger.info(
+                f"{f['NAME'][index]} - moon separation: {moon_pos.separation(mycoords).value}")
         elif (moon_brightness >= .65):
             if 'SPLUS-b' in f['NAME'][index] or 'SPLUS-d' in f['NAME'][index]:
                 myaltazs_time_overnight = mycoords.transform_to(
@@ -205,18 +207,17 @@ def calc_field_track(f: pd.DataFrame,
                     time_on_the_sky = on_the_sky.max() - on_the_sky.min()
                     if time_on_the_sky > 2.:
                         is_observable[i] = 1
-                        logger.info(f['NAME'][index], night_starts,
-                                    'state: on the sky:', time_on_the_sky, 'h')
+                        logger.info(f"{f['NAME'][index]} {
+                                    night_starts} state: on the sky: {time_on_the_sky}h")
                     else:
-                        logger.info(f['NAME'][index], night_starts, 'state: too \
-                            low:', time_on_the_sky, 'h')
+                        logger.info(f"{f['NAME'][index]} {
+                                    night_starts} state: too low: {time_on_the_sky}h")
                 else:
-                    logger.info(f['NAME'][index], night_starts,
-                                'state: not on the sky')
+                    logger.info(f"{f['NAME'][index]} {
+                                night_starts} state: not on the sky")
             else:
-                logger.info(f['NAME'][index], night_starts, 'state: moon or separation; \
-                    moon', moon_brightness, 'sep:\
-                    ', moon_pos.separation(mycoords).value)
+                logger.info(f"{f['NAME'][index]} {night_starts} state: moon or separation; moon brightness: {
+                            moon_brightness}, sep: {moon_pos.separation(mycoords).value}")
         else:
             if 'SPLUS-b' in f['NAME'][index] or 'SPLUS-d' in f['NAME'][index]:
                 logger.info(f['NAME'][index], 'is galactic. Skipping')
@@ -233,15 +234,14 @@ def calc_field_track(f: pd.DataFrame,
                     time_on_the_sky = on_the_sky.max() - on_the_sky.min()
                     if time_on_the_sky > 2.:
                         is_observable[i] = 1
-                        logger.info(f['NAME'][index], night_starts,
-                                    'state: on the sky:\
-                            ', time_on_the_sky, 'h')
+                        logger.info(f"{f['NAME'][index]} {night_starts} \
+                                    state: on the sky: {time_on_the_sky}h")
                     else:
-                        logger.info(f['NAME'][index], night_starts,
-                                    'state: too low:', time_on_the_sky, 'h')
+                        logger.info(f"{f['NAME'][index]} {night_starts} \
+                                     state: too low: {time_on_the_sky}h")
                 else:
-                    logger.info(f['NAME'][index], night_starts,
-                                'state: not on the sky')
+                    logger.info(f"{f['NAME'][index]} {night_starts} \
+                                 state: not on the sky")
         i += 1
 
     t = Table([f['NAME'], is_observable], names=['NAME', night_starts],
@@ -469,6 +469,7 @@ def plot_density(args: argparse.Namespace,
     last_update = datetime.datetime.now().strftime(
         "%Y/%m/%d") if args.last_update is None else args.last_update
     # read the input file and the footprint file
+    args.sym_file = args.sym_file if args.sym_file is not None else args.output_file
     fi = pd.read_csv(os.path.join(args.workdir, args.sym_file))
     # foot = pd.read_csv(os.path.join(args.workdir, args.fields))
     logger.info("Input file and footprint file read successfully.")
@@ -516,7 +517,8 @@ def plot_density(args: argparse.Namespace,
     if args.save_plot:
         outputname = args.output_plot if args.output_plot is not None else 'tile_density.png'
         logger.info('Saving figure output to %s' % outputname)
-        plt.savefig(os.path.join(args.outdir, outputname), format='png',
+        dir2plot = args.outdir if args.outdir is not None else args.workdir
+        plt.savefig(os.path.join(dir2plot, outputname), format='png',
                     bbox_inches='tight', dpi=150)
         logger.info('Figure saved successfully to %s' % outputname)
     else:
